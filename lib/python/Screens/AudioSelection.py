@@ -132,6 +132,8 @@ class AudioSelection(ConfigListScreen, Screen):
 				self.settings.btaudio = ConfigOnOff(default=config.av.btaudio.value)
 				self.settings.btaudio.addNotifier(self.changeBTAudio, initial_call=False)
 				conflist.append(getConfigListEntry(_("Bluetooth Audio"), self.settings.btaudio, None))
+				if config.av.btaudio:
+					conflist.append(getConfigListEntry(_("Bluetooth Audio Delay"), config.av.btaudiodelay, None))
 
 			if track_num > 0:
 				self.audioChannel = service.audioChannel()
