@@ -225,6 +225,9 @@ void eFilePushThread::thread()
 #if HAVE_HISILICON
 							usleep(100000); // 100 milliseconds
 #endif
+#ifdef DREAMNEXTGEN
+							usleep(2000); // 2ms, fast retry to keep audio fed
+#endif
 							continue;
 						}
 						eDebug("[eFilePushThread] write: %m");
@@ -512,20 +515,6 @@ int eFilePushThreadRecorder::read_dmx(int fd, void *m_buffer, int size)
 	if (pos == 0)
 		return bytes;
 	return pos;
-}
-
-int eFilePushThreadRecorder::pushReply(void *buf, int len)
-{
-	m_reply.insert(m_reply.end(), (unsigned char *)buf, (unsigned char *)buf+len);
-	eDebug("pushed reply of %d bytes", len);
-	return 0;
-}
-
-int64_t eFilePushThreadRecorder::getTick()
-{         //ms
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (ts.tv_nsec / 1000000) + (ts.tv_sec * 1000);
 }
 
 void eFilePushThreadRecorder::thread()
