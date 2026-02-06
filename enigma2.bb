@@ -33,6 +33,8 @@ bindir = "/usr/bin"
 sbindir = "/usr/sbin"
 
 EXTRA_OECONF = " \
+    --enable-maintainer-mode --with-target=native --with-libsdl=no \
+    --enable-dependency-tracking \
     BUILD_SYS=${BUILD_SYS} \
     HOST_SYS=${HOST_SYS} \
     STAGING_INCDIR=${STAGING_INCDIR} \
@@ -42,6 +44,7 @@ EXTRA_OECONF = " \
     --with-libsdl=no \
     ${@bb.utils.contains("GST_VERSION", "1.0", "--with-gstversion=1.0", "", d)} \
     ${@bb.utils.contains("MACHINE_FEATURES", "textlcd", "--with-textlcd" , "", d)} \
+    ${@bb.utils.contains("MACHINE_FEATURES", "hifblayer", "--with-hifblayer" , "", d)} \
     ${@bb.utils.contains("MACHINE_FEATURES", "colorlcd", "--with-colorlcd" , "", d)} \
     ${@bb.utils.contains("MACHINE_FEATURES", "colorlcd128", "--with-colorlcd128" , "", d)} \
     ${@bb.utils.contains("MACHINE_FEATURES", "colorlcd220", "--with-colorlcd220" , "", d)} \
