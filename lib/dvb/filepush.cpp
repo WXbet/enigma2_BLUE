@@ -8,19 +8,18 @@
 //#define SHOW_WRITE_TIME
 
 DEFINE_REF(eFilePushThread);
-eFilePushThread::eFilePushThread(int io_prio_class, int io_prio_level, int blocksize, size_t buffersize, int flags)
-	: prio_class(io_prio_class),
-	  prio(io_prio_level),
-	  m_sg(NULL),
-	  m_stop(1),
-	  m_send_pvr_commit(0),
-	  m_stream_mode(0),
-	  m_flags(flags),
-	  m_blocksize(blocksize),
-	  m_buffersize(buffersize),
-	  m_buffer((unsigned char *)malloc(buffersize)),
-	  m_messagepump(eApp, 0),
-	  m_run_state(0)
+
+eFilePushThread::eFilePushThread(int blocksize, size_t buffersize, int flags):
+	 m_sg(NULL),
+	 m_stop(1),
+	 m_send_pvr_commit(0),
+	 m_stream_mode(0),
+	 m_flags(flags),
+	 m_blocksize(blocksize),
+	 m_buffersize(buffersize),
+	 m_buffer((unsigned char *)malloc(buffersize)),
+	 m_messagepump(eApp, 0, "eFilePushThread"),
+	 m_run_state(0)
 {
 	if (m_buffer == NULL)
 		eFatal("[eFilePushThread] Failed to allocate %zu bytes", buffersize);
@@ -58,7 +57,6 @@ void eFilePushThread::thread()
 {
 	ignore_but_report_signals();
 	hasStarted(); /* "start()" blocks until we get here */
-	setIoPrio(prio_class, prio);
 	eDebug("[eFilePushThread] START thread");
 
 	do
@@ -352,16 +350,16 @@ void eFilePushThread::filterRecordData(const unsigned char *data, int len)
 {
 }
 
-eFilePushThreadRecorder::eFilePushThreadRecorder(unsigned char *buffer, size_t buffersize) : m_fd_source(-1),
-																							 m_buffersize(buffersize),
-																							 m_buffer(buffer),
-																							 m_overflow_count(0),
-																							 m_stop(1),
-																							 m_buffer_fill(0),
-																							 m_buffer_min_write(0),
-																							 m_messagepump(eApp, 0)
+eFilePushThreadRecorder::eFilePushThreadRecorder(unsigned char* buffer, size_t buffersize):
+	m_fd_source(-1),
+	m_buffersize(buffersize),
+	m_buffer(buffer),
+	m_overflow_count(0),
+	m_stop(1),
+	m_buffer_fill(0),
+	m_buffer_min_write(0),
+	m_messagepump(eApp, 0, "eFilePushThreadRecorder")
 {
-	m_protocol = m_stream_id = m_session_id = m_packet_no = 0;
 	CONNECT(m_messagepump.recv_msg, eFilePushThreadRecorder::recvEvent);
 
 	/* Read accumulation threshold: 32 KB fixed */
@@ -523,7 +521,6 @@ void eFilePushThreadRecorder::thread()
 	ignore_but_report_signals();
 	hasStarted(); /* "start()" blocks until we get here */
 #endif
-	setIoPrio(IOPRIO_CLASS_RT, 7);
 	eDebug("[eFilePushThreadRecorder] THREAD START (min_write=%zu KB, buffersize=%zu KB)", m_buffer_min_write >> 10, m_buffersize >> 10);
 
 #ifdef HAVE_HISILICON
@@ -536,13 +533,6 @@ void eFilePushThreadRecorder::thread()
 	hasStarted();
 #endif
 
-	if (m_protocol == _PROTO_RTSP_TCP)
-	{
-		int flags = fcntl(m_fd_source, F_GETFL, 0);
-		flags |= O_NONBLOCK;
-		if (fcntl(m_fd_source, F_SETFL, flags) == -1)
-			eDebug("[eFilePushThreadRecorder] failed setting DMX handle %d in non-blocking mode, error %d: %s", m_fd_source, errno, strerror(errno));
-	}
 
 	m_buffer_fill = 0;
 
@@ -551,11 +541,6 @@ void eFilePushThreadRecorder::thread()
 	while (!m_stop)
 	{
 		ssize_t bytes;
-		if (m_protocol == _PROTO_RTSP_TCP)
-		{
-			bytes = read_dmx(m_fd_source, m_buffer + m_buffer_fill, m_buffersize - m_buffer_fill);
-		}
-		else
 		{
 		/* this works around the buggy Broadcom encoder that always returns even if there is no data */
 		/* (works like O_NONBLOCK even when not opened as such), prevent idle waiting for the data */

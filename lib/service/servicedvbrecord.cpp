@@ -24,7 +24,6 @@ eDVBServiceRecord::eDVBServiceRecord(const eServiceReferenceDVB &ref, bool isstr
 	m_record_ecm = false;
 	m_packet_size = 188;
 	m_descramble = true;
-	m_pvr_descramble = false;
 	m_is_stream_client = isstreamclient;
 	m_is_pvr = !m_ref.path.empty() && !m_is_stream_client;
 	m_tuned = 0;
@@ -33,7 +32,6 @@ eDVBServiceRecord::eDVBServiceRecord(const eServiceReferenceDVB &ref, bool isstr
 	m_streaming = 0;
 	m_simulate = false;
 	m_last_event_id = -1;
-	m_serviceType = eDVBServicePMTHandler::recording;
 
 	// Software descrambling initialization
 	m_use_software_descramble = false;
@@ -76,16 +74,10 @@ void eDVBServiceRecord::serviceEvent(int event)
 	}
 	case eDVBServicePMTHandler::eventNewProgramInfo:
 	{
-		// eDebug("[eDVBServiceRecord] eventNewProgramInfo m_state=%d / m_want_record=%d / m_pvr_descramble=%d", m_state, m_want_record, m_pvr_descramble);
 		if (m_state == stateIdle)
 			doPrepare();
 		else if (m_want_record) /* doRecord can be called from Prepared and Recording state */
-		{
-			if (m_pvr_descramble)
-				updateDecoder();
-			else
-				doRecord();
-		}
+			doRecord();
 		m_event((iRecordableService*)this, evNewProgramInfo);
 		break;
 	}
@@ -114,17 +106,9 @@ RESULT eDVBServiceRecord::prepare(const char *filename, time_t begTime, time_t e
 	m_streaming = 0;
 	m_descramble = config_recording_never_decrypt ? false : descramble;
 	m_record_ecm = config_recording_always_ecm ? true : recordecm;
-
-	// force descramble for _pvrdesc.ts
-	if (strstr(filename, "_pvrdesc.ts"))
-	{
-		m_pvr_descramble = true;
-		m_descramble = true;
-		m_record_ecm = false;
-	}
 	m_packet_size = packetsize;
 
-	eTrace("[eDVBServiceRecord] prepare filename %s / m_record_ecm = %d / m_descramble = %d / m_pvr_descramble = %d", filename, m_record_ecm, m_descramble, m_pvr_descramble);
+	eTrace("[eDVBServiceRecord] prepare filename %s / m_record_ecm = %d / m_descramble = %d", filename, m_record_ecm, m_descramble);
 
 	if (m_state == stateIdle)
 	{
@@ -260,17 +244,18 @@ int eDVBServiceRecord::doPrepare()
 
 	if (m_state == stateIdle)
 	{
+		eDVBServicePMTHandler::serviceType servicetype;
 
 		if(tryFallbackTuner(/*REF*/m_ref, /*REF*/m_is_stream_client, m_is_pvr, m_simulate))
 			eDebug("[eDVBServiceRecord] fallback tuner selected");
 
 		if (m_streaming)
 		{
-			m_serviceType = m_record_ecm ? eDVBServicePMTHandler::scrambled_streamserver : eDVBServicePMTHandler::streamserver;
+			servicetype = m_record_ecm ? eDVBServicePMTHandler::scrambled_streamserver : eDVBServicePMTHandler::streamserver;
 		}
 		else
 		{
-			m_serviceType = m_record_ecm ? eDVBServicePMTHandler::scrambled_recording : eDVBServicePMTHandler::recording;
+			servicetype = m_record_ecm ? eDVBServicePMTHandler::scrambled_recording : eDVBServicePMTHandler::recording;
 		}
 		m_pids_active.clear();
 		m_state = statePrepared;
@@ -295,7 +280,7 @@ int eDVBServiceRecord::doPrepare()
 					m_descramble = true;
 
 				m_record_ecm = false;
-				m_serviceType = eDVBServicePMTHandler::streamclient;
+				servicetype = eDVBServicePMTHandler::streamclient;
 				eHttpStream *f = new eHttpStream();
 				f->open(m_ref.path.c_str());
 				source = ePtr<iTsSource>(f);
@@ -313,7 +298,7 @@ int eDVBServiceRecord::doPrepare()
 					packetsize = meta.m_packet_size;
 					m_descramble = meta.m_scrambled;
 				}
-				m_serviceType = eDVBServicePMTHandler::offline;
+				servicetype = eDVBServicePMTHandler::offline;
 				eRawFile *f = new eRawFile(packetsize);
 				f->open(m_ref.path.c_str());
 				source = ePtr<iTsSource>(f);
@@ -322,26 +307,20 @@ int eDVBServiceRecord::doPrepare()
 		}
 		else
 		{
-			// Check for pvr descramble mode
-			if(m_pvr_descramble)
-			{
-				m_serviceType = eDVBServicePMTHandler::pvrDescramble;
-			}
 			m_event((iRecordableService*)this, evTuneStart);
 		}
-		eTrace("[eDVBServiceRecord] doPrepare m_ref:%s / m_simulate:%d / m_serviceType:%d / m_is_stream_client:%d / m_descramble:%d / m_pvr_descramble:%d", m_ref.path.c_str(), m_simulate, m_serviceType, m_is_stream_client, m_descramble, m_pvr_descramble);
-
-		return m_service_handler.tuneExt(m_ref, source, m_ref.path.c_str(), 0, m_simulate, NULL, m_serviceType, m_descramble);
+		return m_service_handler.tuneExt(m_ref, source, m_ref.path.c_str(), 0, m_simulate, NULL, servicetype, m_descramble);
 	}
 	return 0;
 }
 
+// Called to setup software descrambling for recording
 int eDVBServiceRecord::setupSoftwareDescrambler(eDVBServicePMTHandler::program& program)
 {
-	eDebug("[eDVBServiceRecord] Setting up software descrambler");
+	eDebug("[eDVBServiceRecord] Setting up CSA session for recording");
 
-	// Create CSA session for this recording
-	eServiceReferenceDVB ref = (eServiceReferenceDVB&)m_ref;
+	// Create session for recording (no decoder needed)
+	eServiceReferenceDVB ref(m_ref);
 	m_csa_session = new eDVBCSASession(ref);
 	if (!m_csa_session)
 	{
@@ -349,103 +328,39 @@ int eDVBServiceRecord::setupSoftwareDescrambler(eDVBServicePMTHandler::program& 
 		return -1;
 	}
 
-	// Initialize the session
+	// Initialize session - connects to CAHandler for CW reception
 	if (!m_csa_session->init())
 	{
-		eWarning("[eDVBServiceRecord] Failed to init CSA session");
+		eWarning("[eDVBServiceRecord] Failed to initialize CSA session");
 		m_csa_session = nullptr;
-		return -1;
+		return -2;
 	}
 
-	// Start ECM monitor for CSA-ALT detection
+	// Start ECM monitor for CSA-ALT detection and ecm_mode extraction
+	// This is needed for timer recordings where no Live-TV is running
 	if (!program.caids.empty())
 	{
+		uint16_t ecm_pid = program.caids.front().capid;
+		uint16_t caid = program.caids.front().caid;
 		ePtr<iDVBDemux> demux;
 		if (m_service_handler.getDataDemux(demux) == 0 && demux)
 		{
-			uint16_t ecm_pid = program.caids.front().capid;
-			uint16_t caid = program.caids.front().caid;
+			eDebug("[eDVBServiceRecord] Starting ECM monitor on PID %d, CAID 0x%04X", ecm_pid, caid);
 			m_csa_session->startECMMonitor(demux, ecm_pid, caid);
-			eDebug("[eDVBServiceRecord] Started ECM monitor for recording, ECM PID=%d, CAID=0x%04X", ecm_pid, caid);
 		}
 	}
 
-	// Force activate since we're recording (can't wait for ECM analysis)
+	// Activate session immediately - recording can't wait for ECM analysis
+	// If cache has CSA-ALT info, ecm_mode will be used from cache
+	// Otherwise default ecm_mode is used until first ECM arrives
 	m_csa_session->forceActivate();
 
+	eDebug("[eDVBServiceRecord] CSA session activated for recording");
+
+	// No startup buffering for recording (data goes directly to file)
+
 	m_use_software_descramble = true;
-	eDebug("[eDVBServiceRecord] Software descrambler setup complete");
 	return 0;
-}
-
-void eDVBServiceRecord::updateDecoder()
-{
-	int vpid = -1, vpidtype = -1, apid = -1, apidtype = -1;
-
-	eDVBServicePMTHandler &h = m_service_handler;
-
-	eDVBServicePMTHandler::program program;
-	if (m_service_handler.getProgramInfo(program))
-		eDebug("[eDVBServiceRecord] getting program info failed.");
-	else
-	{
-		eDebugNoNewLineStart("[eDVBServiceRecord] have %zd video stream(s)", program.videoStreams.size());
-		if (!program.videoStreams.empty())
-		{
-			eDebugNoNewLine(" (");
-			for (std::vector<eDVBServicePMTHandler::videoStream>::const_iterator
-				i(program.videoStreams.begin());
-				i != program.videoStreams.end(); ++i)
-			{
-				if (vpid == -1)
-				{
-					vpid = i->pid;
-					vpidtype = i->type;
-				}
-				if (i != program.videoStreams.begin())
-					eDebugNoNewLine(", ");
-				eDebugNoNewLine("%04x", i->pid);
-			}
-			eDebugNoNewLine(")");
-		}
-
-		eDebugNoNewLine(", and %zd audio stream(s)", program.audioStreams.size());
-		if (!program.audioStreams.empty())
-		{
-			eDebugNoNewLine(" (");
-			for (std::vector<eDVBServicePMTHandler::audioStream>::const_iterator
-				i(program.audioStreams.begin());
-				i != program.audioStreams.end(); ++i)
-			{
-				if (i != program.audioStreams.begin())
-					eDebugNoNewLine(", ");
-				eDebugNoNewLine("%04x", i->pid);
-			}
-			eDebugNoNewLine(")");
-		}
-
-		apid = program.audioStreams[program.defaultAudioStream].pid;
-		apidtype = program.audioStreams[program.defaultAudioStream].type;
-
-		eDebugNoNewLine(", and the pcr pid is %04x\n", program.pcrPid);
-	}
-
-	if (!m_decoder)
-	{
-		h.getDecodeDemux(m_decode_demux);
-		if (m_decode_demux)
-		{
-			m_decode_demux->getMPEGDecoder(m_decoder, 0);
-		}
-	}
-
-	if (m_decoder)
-	{
-		m_decoder->setVideoPID(vpid, vpidtype);
-		m_decoder->setAudioPID(apid, apidtype);
-		m_decoder->setSyncPCR(-1);
-		m_decoder->play();
-	}
 }
 
 int eDVBServiceRecord::doRecord()
@@ -483,7 +398,7 @@ int eDVBServiceRecord::doRecord()
 			::close(fd);
 			return errNoDemuxAvailable;
 		}
-		demux->createTSRecorder(m_record, m_packet_size);
+		demux->createTSRecorder(m_record, m_packet_size, false);
 		if (!m_record)
 		{
 			eDebug("[eDVBServiceRecord] no ts recorder available.");
@@ -610,12 +525,6 @@ int eDVBServiceRecord::doRecord()
 					if (i != program.audioStreams.begin())
 						eDebugNoNewLine(", ");
 					eDebugNoNewLine("%04x", i->pid);
-
-					if (i->rdsPid != -1)
-					{
-						pids_to_record.insert(i->rdsPid);
-						eDebugNoNewLine(", (RDS %04x)", i->rdsPid);
-					}
 				}
 				eDebugNoNewLine(")");
 			}
@@ -648,8 +557,6 @@ int eDVBServiceRecord::doRecord()
 				{
 					if (i->capid >= 0) pids_to_record.insert(i->capid);
 				}
-				pids_to_record.insert(EventInformationSection::PID);
-				pids_to_record.insert(TimeAndDateSection::PID);
 			}
 
 			bool include_ait = eConfigManager::getConfigBoolValue("config.recording.include_ait");

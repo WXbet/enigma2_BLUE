@@ -19,7 +19,7 @@ class eFilePushThread: public eThread, public sigc::trackable, public iObject
 {
 	DECLARE_REF(eFilePushThread);
 public:
-	eFilePushThread(int prio_class=IOPRIO_CLASS_BE, int prio_level=0, int blocksize=188, size_t buffersize=188*1024, int flags=0);
+	eFilePushThread(int blocksize=188, size_t buffersize=188*1024, int flags=0);
 	~eFilePushThread();
 	void thread();
 	void stop();
@@ -41,10 +41,9 @@ public:
 protected:
 	virtual void filterRecordData(const unsigned char *data, int len);
 private:
-	int prio_class;
-	int prio;
 	iFilePushScatterGather *m_sg;
 	int m_stop;
+	bool m_stopped;
 	int m_fd_dest;
 	int m_send_pvr_commit;
 	int m_stream_mode;
@@ -80,7 +79,7 @@ public:
 	void setProtocol(int i){ m_protocol = i;}
 	void setSession(int se, int st) { m_session_id = se; m_stream_id = st;}
 	int read_dmx(int fd, void *m_buffer, int size);
-	int pushReply(void *buf, int len);	
+	int pushReply(void *buf, int len);
 	void sendEvent(int evt);
 	static int64_t getTick();
 	static int read_ts(int fd, unsigned char *buf, int size);

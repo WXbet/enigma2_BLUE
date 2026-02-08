@@ -172,6 +172,16 @@ RESULT eBouquet::setListName(const std::string &name)
 	return 0;
 }
 
+const eDVBService::cacheID eDVBService::audioCacheTags[] = {
+	eDVBService::cMPEGAPID, eDVBService::cAC3PID,
+	eDVBService::cAACHEAPID, eDVBService::cDDPPID,
+	eDVBService::cDTSPID, eDVBService::cAACAPID,
+	eDVBService::cLPCMPID, eDVBService::cDTSHDPID,
+};
+
+const int eDVBService::nAudioCacheTags = sizeof(eDVBService::audioCacheTags) / sizeof(eDVBService::audioCacheTags[0]);
+
+
 eDVBService::eDVBService()
 	:m_cache(0), m_flags(0)
 {
@@ -407,6 +417,15 @@ bool eDVBService::cacheEmpty()
 	return true;
 }
 
+bool eDVBService::cacheAudioEmpty()
+{
+	if (m_cache)
+		for (int i=0; i < nAudioCacheTags; ++i)
+			if (m_cache[audioCacheTags[i]] != -1)
+				return false;
+	return true;
+}
+
 void eDVBService::initCache()
 {
 	m_cache = new int[cacheMax];
@@ -490,6 +509,10 @@ void eDVBService::setCacheEntry(cacheID id, int pid)
 			std::string ref_s;
 			join_str(ref_split_r, ':', ref_s);
 			int pid_val = pid > 0 ? pid : -1;
+			if (endsWith(ref_s, ":"))
+			{
+				ref_s = ref_s.substr(0, ref_s.size()-1);
+			}
 			eIPTVDBItem item(ref_s, id == cacheID::cMPEGAPID ? pid_val : -1, id == cacheID::cAC3PID ? pid_val : -1, id == cacheID::cAC4PID ? pid_val : -1,
 							id == cacheID::cDDPPID ? pid_val : -1, id == cacheID::cAACHEAPID ? pid_val : -1, id == cacheID::cAACAPID ? pid_val : -1,
 							id == cacheID::cDRAAPID ? pid_val : -1, id == cacheID::cSUBTITLE ? pid_val : -1, id == cacheID::cVPID ? pid_val : -1);

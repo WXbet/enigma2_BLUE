@@ -52,6 +52,7 @@ public:
 template<class T>
 class eFixedMessagePump: public sigc::trackable, FD
 {
+	const char *name;
 	eSingleLock lock;
 	ePtr<eSocketNotifier> sn;
 	std::queue<T> m_queue;
@@ -107,6 +108,14 @@ public:
 	}
 	eFixedMessagePump(eMainloop *context, int mt):
 		FD(eventfd(0, EFD_CLOEXEC)),
+		sn(eSocketNotifier::create(context, m_fd, eSocketNotifier::Read, false))
+	{
+		CONNECT(sn->activated, eFixedMessagePump<T>::do_recv);
+		sn->start();
+	}
+	eFixedMessagePump(eMainloop *context, int mt, const char *name):
+		FD(eventfd(0, EFD_CLOEXEC)),
+		name(name),
 		sn(eSocketNotifier::create(context, m_fd, eSocketNotifier::Read, false))
 	{
 		CONNECT(sn->activated, eFixedMessagePump<T>::do_recv);

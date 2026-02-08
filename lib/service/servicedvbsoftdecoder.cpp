@@ -447,7 +447,7 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 {
 	int timing_pid = -1;
 	int timing_stream_type = -1;
-	int vpid = -1, vpidtype = -1, pcrpid = -1;
+	int vpid = -1, vpidtype = -1, pcrpid = -1, tpid = -1;
 
 	eDVBServicePMTHandler::program program;
 	if (m_source_handler.getProgramInfo(program))
@@ -530,7 +530,7 @@ void eDVBSoftDecoder::updatePids(bool withDecoder)
 	eDebugNoNewLine(", and the text pid is %04x\n", program.textPid);
 	if (program.textPid != -1)
 		pids_to_record.insert(program.textPid); // Videotext
-	(void)program.textPid; // textPid already added above
+	tpid = program.textPid;
 
 	if (program.aitPid >= 0) pids_to_record.insert(program.aitPid);
 
@@ -612,14 +612,9 @@ void eDVBSoftDecoder::updateDecoder(int vpid, int vpidtype, int pcrpid)
 			// This preserves user's previous audio selection for this channel
 			if (m_dvb_service)
 			{
-				// Check all audio cache entries
-				static const eDVBService::cacheID audioCacheTags[] = {
-					eDVBService::cMPEGAPID, eDVBService::cAC3PID, eDVBService::cAACHEAPID,
-					eDVBService::cDDPPID, eDVBService::cAACAPID
-				};
-				for(unsigned int m = 0; m < sizeof(audioCacheTags)/sizeof(audioCacheTags[0]); m++)
+				for(int m = 0; m < eDVBService::nAudioCacheTags; m++)
 				{
-					int cached_apid = m_dvb_service->getCacheEntry(audioCacheTags[m]);
+					int cached_apid = m_dvb_service->getCacheEntry(eDVBService::audioCacheTags[m]);
 					if (cached_apid != -1)
 					{
 						// Find matching stream index for this cached PID

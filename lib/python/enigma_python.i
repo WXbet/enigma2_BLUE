@@ -195,12 +195,7 @@ typedef long time_t;
 %immutable ePythonMessagePump::recv_msg;
 %immutable eDVBLocalTimeHandler::m_timeUpdated;
 %immutable eFCCServiceManager::m_fcc_event;
-%immutable iCryptoInfo::clientname;
-%immutable iCryptoInfo::clientinfo;
-%immutable iCryptoInfo::verboseinfo;
-%immutable iCryptoInfo::usedcaid;
-%immutable iCryptoInfo::decodetime;
-%immutable iCryptoInfo::usedcardid;
+
 %immutable eTuxtxtApp::appClosed;
 %immutable iDVBChannel::receivedTsidOnid;
 %immutable eDVBSatelliteEquipmentControl::slotRotorSatPosChanged;

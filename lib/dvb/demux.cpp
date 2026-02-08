@@ -144,7 +144,7 @@ RESULT eDVBDemux::createPESReader(eMainloop *context, ePtr<iDVBPESReader> &reade
 	return res;
 }
 
-RESULT eDVBDemux::createTSRecorder(ePtr<iDVBTSRecorder> &recorder, int packetsize, bool streaming, bool sync_mode, bool is_streaming_output)
+RESULT eDVBDemux::createTSRecorder(ePtr<iDVBTSRecorder> &recorder, unsigned int packetsize, bool streaming, bool sync_mode, bool is_streaming_output)
 {
 	if (m_dvr_busy)
 		return -EBUSY;
@@ -271,7 +271,6 @@ RESULT eDVBSectionReader::start(const eDVBSectionFilterMask &mask)
 	notifier->start();
 
 	dmx_sct_filter_params sct = {};
-	memset(&sct, 0, sizeof(sct));
 	sct.pid     = mask.pid;
 	sct.timeout = 0;
 	sct.flags   = DMX_IMMEDIATE_START;
@@ -384,8 +383,6 @@ RESULT eDVBPESReader::start(int pid)
 	m_notifier->start();
 
 	dmx_pes_filter_params flt = {};
-	memset(&flt, 0, sizeof(flt));
-
 	flt.pes_type = DMX_PES_OTHER;
 	flt.pid     = pid;
 	flt.input   = DMX_IN_FRONTEND;
@@ -621,7 +618,7 @@ int eDVBRecordFileThread::AsyncIO::poll()
 
 int eDVBRecordFileThread::AsyncIO::start(int fd, off_t offset, size_t nbytes, void* buffer)
 {
-	memset(&aio, 0, sizeof(struct aiocb)); // Documentation says "zero it before call".
+	memset(&aio, 0, sizeof(aiocb)); // Documentation says "zero it before call".
 	aio.aio_fildes = fd;
 	aio.aio_nbytes = nbytes;
 	aio.aio_offset = offset;   // Offset can be omitted with O_APPEND
@@ -640,9 +637,14 @@ int eDVBRecordFileThread::asyncWrite(int len)
 	// Only call parseData here if no descrambler is set.
 	// When a descrambler is active, eDVBRecordScrambledThread::writeData()
 	// calls parseData AFTER descrambling to ensure we parse clear data.
-	if (!getProtocol() && !m_serviceDescrambler)
+	if (!m_serviceDescrambler)
 	{
-		m_ts_parser.parseData(m_current_offset, m_buffer, len);
+		int parse_result = m_ts_parser.parseData(m_current_offset, m_buffer, len);
+		if (parse_result == -2)
+		{
+			m_event(eFilePushThreadRecorder::evtStreamCorrupt);
+			return len;
+		}
 	}
 
 #ifdef SHOW_WRITE_TIME
@@ -726,7 +728,7 @@ int eDVBRecordFileThread::writeData(int len)
 		// Only call parseData here if no descrambler is set.
 		// When a descrambler is active, eDVBRecordScrambledThread::writeData()
 		// calls parseData AFTER descrambling to ensure we parse clear data.
-		if (!getProtocol() && !m_serviceDescrambler)
+		if (!m_serviceDescrambler)
 		{
 			m_ts_parser.parseData(m_current_offset, m_buffer, len);
 		}
@@ -742,7 +744,7 @@ int eDVBRecordFileThread::writeData(int len)
 			}
 			if (w < 0 && errno == EINTR)
 				continue;
-			if (w < 0 && errno == EAGAIN)
+			if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			{
 				usleep(1000);
 				continue;
@@ -1006,12 +1008,10 @@ int eDVBRecordScrambledThread::writeData(int len)
 	// For SoftCSA: descrambles in-place when CW available,
 	// passes through encrypted when no CW (may cause artifacts at channel start)
 	if (m_serviceDescrambler)
+	{
 		m_serviceDescrambler->descramble(m_buffer, len);
 
-	// Parse AFTER descrambling for correct Access Points (.ap files)
-	// This is needed because asyncWrite/writeData skip parseData when m_serviceDescrambler is set
-	if (!getProtocol())
-	{
+		// Parse AFTER descrambling for correct Access Points (.ap files)
 		m_ts_parser.parseData(m_current_offset, m_buffer, len);
 	}
 
@@ -1100,7 +1100,6 @@ RESULT eDVBTSRecorder::start()
 	setBufferSize(1024*1024);
 
 	dmx_pes_filter_params flt = {};
-	memset(&flt, 0, sizeof(flt));
 	flt.pes_type = DMX_PES_OTHER;
 	flt.output  = DMX_OUT_TSDEMUX_TAP;
 	flt.pid     = i->first;

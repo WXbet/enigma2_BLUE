@@ -136,7 +136,9 @@ int eEncoder::allocateEncoder(const std::string &serviceref, int &buffersize,
 		return(-1);
 	}
 
-	// Fixme : change the encoder parameter for bcm encoding
+	// Set encoder parameters - unified for both BCM and HiSilicon encoders
+	// BCM parameters now enabled for URL parameter support via Port 8001
+	// This makes transtreamproxy obsolete and enables SoftCSA for transcoding
 
 	if(bcm_encoder)
 	{
@@ -144,38 +146,36 @@ int eEncoder::allocateEncoder(const std::string &serviceref, int &buffersize,
 		acodec_node = "audio_codec";
 		encoder[encoder_index].navigation_instance = encoder[encoder_index].navigation_instance_alternative;
 
-		/*
+		// Write transcoding parameters to /proc/stb/encoder for BCM
+		eDebug("[eEncoder] BCM encoder %d: setting bitrate=%d framerate=%d", encoder_index, bitrate, framerate);
 
 		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/bitrate", encoder_index);
 		CFile::writeInt(filename, bitrate);
 
+		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/framerate", encoder_index);
+		CFile::writeInt(filename, framerate);
+
+		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/display_format", encoder_index);
+		if(height > 576)
+			CFile::write(filename, "720p");
+		else if(height > 480)
+			CFile::write(filename, "576p");
+		else
+			CFile::write(filename, "480p");
+
+		/*
 		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/width", encoder_index);
 		CFile::writeInt(filename, width);
 
 		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/height", encoder_index);
 		CFile::writeInt(filename, height);
 
-		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/framerate", encoder_index);
-		CFile::writeInt(filename, framerate);
-
 		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/interlaced", encoder_index);
 		CFile::writeInt(filename, interlaced);
 
 		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/aspectratio", encoder_index);
 		CFile::writeInt(filename, aspectratio);
-
-
-		snprintf(filename, sizeof(filename), "/proc/stb/encoder/%d/display_format", encoder_index);
-
-		if(height > 576)
-			CFile::write(filename, "720p");
-		else
-			if(height > 480)
-				CFile::write(filename, "576p");
-			else
-				CFile::write(filename, "480p");
 		*/
-
 	}
 	else
 	{

@@ -111,7 +111,6 @@ void ePMTClient::dataAvailable()
 		receivedData = NULL;
 		receivedLength = 0;
 		memset(receivedHeader, 0, 5);
-		receivedTag[0] = 0;
 	}
 }
 
@@ -369,13 +368,15 @@ int ePMTClient::writeCAPMTObject(const char* capmt, int len)
 	return 0;
 }
 
+
 eDVBCAHandler *eDVBCAHandler::instance = NULL;
 
 DEFINE_REF(eDVBCAHandler);
 
 eDVBCAHandler::eDVBCAHandler()
- : eServerSocket(PMT_SERVER_SOCKET, eApp), serviceLeft(eTimer::create(eApp)), serviceIdCounter(1)
+ : eServerSocket(PMT_SERVER_SOCKET, eApp), serviceLeft(eTimer::create(eApp))
 {
+	serviceIdCounter = 1;
 	if (instance == NULL)
 	{
 		instance = this;
@@ -423,18 +424,24 @@ int eDVBCAHandler::getNumberOfCAServices()
 int eDVBCAHandler::registerService(const eServiceReferenceDVB &ref, int adapter, int demux_nums[2], int servicetype, eDVBCAService *&caservice)
 {
 	CAServiceMap::iterator it = services.find(ref);
+	bool had_streamserver = false;
 	if (it != services.end())
 	{
 		caservice = it->second;
+		// Check if streamserver was already active before adding new type
+		// servicetype 7 = streamserver, 8 = scrambled_streamserver
+		uint32_t mask = caservice->getServiceTypeMask();
+		had_streamserver = (mask & ((1 << 7) | (1 << 8))) != 0;
 	}
 	else
 	{
-		// Check if we have a cached serviceId for this service reference
+		// Check if we have a cached serviceId for this DVB service
 		uint32_t serviceId;
-		auto cache_it = s_serviceId_cache.find(ref);
+		std::map<eServiceReferenceDVB, uint32_t>::iterator cache_it = s_serviceId_cache.find(ref);
 		if (cache_it != s_serviceId_cache.end())
 		{
 			serviceId = cache_it->second;
+			eDebug("[eDVBCAService] reusing cached serviceId %u for %s", serviceId, ref.toString().c_str());
 		}
 		else
 		{
@@ -443,7 +450,7 @@ int eDVBCAHandler::registerService(const eServiceReferenceDVB &ref, int adapter,
 		}
 		caservice = (services[ref] = new eDVBCAService(ref, serviceId));
 		caservice->setAdapter(adapter);
-		eDebug("[eDVBCAService] new service %s (serviceId=%u)", ref.toString().c_str(), serviceId);
+		eDebug("[eDVBCAService] new service %s, serviceId %u", ref.toString().c_str(), serviceId);
 	}
 	caservice->addServiceType(servicetype);
 
@@ -461,11 +468,11 @@ int eDVBCAHandler::registerService(const eServiceReferenceDVB &ref, int adapter,
 		if (iter < max_demux_slots)
 		{
 			caservice->setUsedDemux(iter, demux_nums[i] & 0xFF);
-			eDebug("[eDVBCAService] add demux %d to slot %d service %s", demux_nums[i] & 0xFF, iter, ref.toString().c_str());
+			eDebug("[eDVBCAHandler] add demux %d to slot %d service %s", demux_nums[i] & 0xFF, iter, ref.toString().c_str());
 		}
 		else
 		{
-			eDebug("[eDVBCAService] no more demux slots free for service %s!!", ref.toString().c_str());
+			eDebug("[eDVBCAHandler] no more demux slots free for service %s!!", ref.toString().c_str());
 			return -1;
 		}
 	}
@@ -482,7 +489,27 @@ int eDVBCAHandler::registerService(const eServiceReferenceDVB &ref, int adapter,
 	std::map<eServiceReferenceDVB, ePtr<eTable<ProgramMapSection> > >::const_iterator cacheit = pmtCache.find(ref);
 	if (cacheit != pmtCache.end() && cacheit->second)
 	{
-		processPMTForService(caservice, cacheit->second);
+		// If streamserver was active and we're adding a different type (e.g. Live-TV),
+		// send CA PMT update immediately so OSCam knows about the new demux config
+		if (had_streamserver && servicetype != 7 && servicetype != 8)
+		{
+			caservice->resetBuildHash();
+			if (caservice->buildCAPMT(cacheit->second) >= 0)
+			{
+				for (ePtrList<ePMTClient>::iterator client_it = clients.begin(); client_it != clients.end(); ++client_it)
+				{
+					if (client_it->state() == eSocket::Connection)
+					{
+						caservice->writeCAPMTObject(*client_it, LIST_UPDATE);
+					}
+				}
+				eDebug("[eDVBCAService] sent early CA PMT update (streamserver active, new type %d registering)", servicetype);
+			}
+		}
+		else
+		{
+			processPMTForService(caservice, cacheit->second);
+		}
 	}
 	return 0;
 }
@@ -492,7 +519,7 @@ int eDVBCAHandler::unregisterService(const eServiceReferenceDVB &ref, int adapte
 	CAServiceMap::iterator it = services.find(ref);
 	if (it == services.end())
 	{
-		eDebug("[eDVBCAService] try to unregister non registered %s", ref.toString().c_str());
+		eDebug("[eDVBCAHandler] try to unregister non registered %s", ref.toString().c_str());
 		return -1;
 	}
 	else
@@ -511,7 +538,7 @@ int eDVBCAHandler::unregisterService(const eServiceReferenceDVB &ref, int adapte
 				{
 					if (!freed && caservice->getUsedDemux(iter) == demux_nums[i])
 					{
-						eDebug("[eDVBCAService] free slot %d demux %d for service %s", iter, demux_nums[i], caservice->toString().c_str());
+						eDebug("[eDVBCAHandler] free slot %d demux %d for service %s", iter, demux_nums[i], caservice->toString().c_str());
 						caservice->setUsedDemux(iter, 0xFF);
 						freed = true;
 					}
@@ -525,7 +552,7 @@ int eDVBCAHandler::unregisterService(const eServiceReferenceDVB &ref, int adapte
 			}
 			if (!freed)
 			{
-				eDebug("[eDVBCAService] couldn't free demux slot for demux %d", demux_nums[i]);
+				eDebug("[eDVBCAHandler] couldn't free demux slot for demux %d", demux_nums[i]);
 			}
 			if (i || loops == 1)
 			{
@@ -542,16 +569,24 @@ int eDVBCAHandler::unregisterService(const eServiceReferenceDVB &ref, int adapte
 				}
 				else
 				{
-					if (ptr)
+					// Only send CA PMT update when streamserver stops but other types remain
+					// (e.g. StreamRelay stopped while Live-TV still active)
+					// servicetype 7 = streamserver, 8 = scrambled_streamserver
+					if (ptr && (servicetype == 7 || servicetype == 8))
 					{
-						if (it->second->buildCAPMT(ptr) >= 0)
+						caservice->resetBuildHash();
+						if (caservice->buildCAPMT(ptr) >= 0)
 						{
-							it->second->sendCAPMT();
+							// Send to all connected clients (PMT mode 6, Protocol 3)
+							for (ePtrList<ePMTClient>::iterator client_it = clients.begin(); client_it != clients.end(); ++client_it)
+							{
+								if (client_it->state() == eSocket::Connection)
+								{
+									caservice->writeCAPMTObject(*client_it, LIST_UPDATE);
+								}
+							}
+							eDebug("[eDVBCAService] sent CA PMT update after streamserver unregister");
 						}
-					}
-					else
-					{
-						eDebug("[eDVBCAService] can not send updated demux info");
 					}
 				}
 			}
@@ -559,8 +594,6 @@ int eDVBCAHandler::unregisterService(const eServiceReferenceDVB &ref, int adapte
 	}
 
 	serviceLeft->startLongTimer(2);
-
-	usedcaid(0);
 
 	return 0;
 }
@@ -599,7 +632,7 @@ void eDVBCAHandler::distributeCAPMT()
 				eDVBCAService *current = it->second;
 				++it;
 				if (it == services.end()) list_management |= LIST_LAST;
-				current->writeCAPMTObject(*client_it, (int)list_management);
+				current->writeCAPMTObject(*client_it, list_management);
 				list_management = LIST_MORE;
 			}
 		}
@@ -681,6 +714,20 @@ void eDVBCAHandler::handlePMT(const eServiceReferenceDVB &ref, ePtr<eDVBService>
 	distributeCAPMT();
 }
 
+int eDVBCAHandler::getServiceReference(eServiceReferenceDVB &service, uint32_t serviceId)
+{
+	CAServiceMap::iterator it;
+	for (it = services.begin(); it != services.end(); it++)
+	{
+		if (it->second->getId() == serviceId)
+		{
+			service = it->first;
+			return 0;
+		}
+	}
+	return -1;
+}
+
 eDVBCAService::eDVBCAService(const eServiceReferenceDVB &service, uint32_t id)
 	: eUnixDomainSocket(eApp), m_service(service), m_adapter(0), m_service_type_mask(0), m_prev_build_hash(0), m_crc32(0), m_id(id), m_version(-1), m_retryTimer(eTimer::create(eApp))
 {
@@ -691,7 +738,7 @@ eDVBCAService::eDVBCAService(const eServiceReferenceDVB &service, uint32_t id)
 
 eDVBCAService::~eDVBCAService()
 {
-	eDebug("[eDVBCAService] free service %s", m_service.toString().c_str());
+	eDebug("[eDVBCAHandler] free service %s", m_service.toString().c_str());
 }
 
 std::string eDVBCAService::toString()
@@ -783,7 +830,7 @@ int eDVBCAService::buildCAPMT(eTable<ProgramMapSection> *ptr)
 
 	if (data_demux == -1)
 	{
-		eDebug("[eDVBCAService] no data demux found for service %s", m_service.toString().c_str());
+		eDebug("[eDVBCAHandler] no data demux found for service %s", m_service.toString().c_str());
 		return -1;
 	}
 
@@ -828,14 +875,14 @@ int eDVBCAService::buildCAPMT(eTable<ProgramMapSection> *ptr)
 		crc = (*i)->getCrc32();
 		if (build_hash == m_prev_build_hash && crc == m_crc32)
 		{
-			eDebug("[eDVBCAService] don't build/send the same CA PMT twice");
+			eDebug("[eDVBCAHandler] don't build/send the same CA PMT twice");
 			return -1;
 		}
 		CaProgramMapSection capmt(*i++, m_prev_build_hash ? LIST_UPDATE : LIST_ONLY, CMD_OK_DESCRAMBLING);
 
 		while( i != ptr->getSections().end() )
 		{
-//			eDebug("[eDVBCAService] append");
+//			eDebug("[eDVBCAHandler] append");
 			capmt.append(*i++);
 		}
 
@@ -942,7 +989,7 @@ int eDVBCAService::buildCAPMT(ePtr<eDVBService> &dvbservice)
 
 	if (data_demux == -1)
 	{
-		eDebug("[eDVBCAService] no data demux found for service %s", m_service.toString().c_str());
+		eDebug("[eDVBCAHandler] no data demux found for service %s", m_service.toString().c_str());
 		return -1;
 	}
 
@@ -964,15 +1011,15 @@ int eDVBCAService::buildCAPMT(ePtr<eDVBService> &dvbservice)
 	//build_hash <<= 16;
 	//build_hash |= (m_service_type_mask & 0xffff); // don't include in build_hash
 
-	// protocol version >= 3 add extra header (will be skipped if version < 3)
-	m_capmt[0] = 0xA5; // message start
-	m_capmt[1] = m_id >> 24;
-	m_capmt[2] = m_id >> 16;
-	m_capmt[3] = m_id >>  8;
-	m_capmt[4] = m_id & 0xFF; // msgid
-
-	int pos = 5; // start after protocol 3 header
+	int pos = 0;
 	int programInfoLength = 0;
+
+	// protocol version >= 3 add extra header (will be skipped if version < 3)
+	m_capmt[pos++] = 0xA5; // message start
+	m_capmt[pos++] = m_id >> 24;
+	m_capmt[pos++] = m_id >> 16;
+	m_capmt[pos++] = m_id >>  8;
+	m_capmt[pos++] = m_id & 0xFF; // msgid
 
 	m_capmt[pos++] = 0x9f; // (caPmtTag >> 16) & 0xff;
 	m_capmt[pos++] = 0x80; // (caPmtTag >> 8) & 0xff;
@@ -1096,12 +1143,12 @@ int eDVBCAService::buildCAPMT(ePtr<eDVBService> &dvbservice)
 		}
 	}
 
-	// calculate capmt length (after protocol 3 header)
-	m_capmt[8] = pos - 9; // pos - 5 (header) - 4 (tag+len)
+	// calculate capmt length
+	m_capmt[3] = pos - 9;
 
-	// calculate programinfo length
-	m_capmt[13] = programInfoLength>>8;
-	m_capmt[14] = programInfoLength&0xFF;
+	// calculate programinfo leght
+	m_capmt[8] = programInfoLength>>8;
+	m_capmt[9] = programInfoLength&0xFF;
 
 	m_prev_build_hash = build_hash;
 	m_version = pmt_version;
@@ -1172,19 +1219,6 @@ int eDVBCAService::writeCAPMTObject(ePMTClient *client, int list_management)
 	}
 
 	return client->writeCAPMTObject((const char*)m_capmt, wp);
-}
-
-int eDVBCAHandler::getServiceReference(eServiceReferenceDVB &service, uint32_t serviceId)
-{
-	for (CAServiceMap::iterator it = services.begin(); it != services.end(); ++it)
-	{
-		if (it->second->getId() == serviceId)
-		{
-			service = it->first;
-			return 0;
-		}
-	}
-	return -1;
 }
 
 eAutoInitPtr<eDVBCAHandler> init_eDVBCAHandler(eAutoInitNumbers::dvb, "CA handler");

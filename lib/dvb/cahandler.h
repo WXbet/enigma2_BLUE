@@ -76,10 +76,10 @@
 #define CMD_OK_MMI					0x02
 #define CMD_QUERY						0x03
 #define CMD_NOT_SELECTED		0x04
-												/* CA application should stop descrambling this service
-												 * (used when the last service in a list has left, note
-												 * that there is no CI definition to send an empty list)
-												 */
+/* CA application should stop descrambling this service
+* (used when the last service in a list has left, note
+* that there is no CI definition to send an empty list)
+*/
 
 class eDVBCAHandler;
 
@@ -155,12 +155,6 @@ public:
 	iCryptoInfo();
 	~iCryptoInfo();
 #endif
-	PSignal1<void, const char*> clientname;
-	PSignal1<void, const char*> clientinfo;
-	PSignal1<void, const char*> verboseinfo;
-	PSignal1<void, int> usedcaid;
-	PSignal1<void, int> decodetime;
-	PSignal1<void, const char*> usedcardid;
 	sigc::signal<void(eServiceReferenceDVB, int, const char*, uint16_t)> receivedCw;  // service, parity, cw, caid
 };
 SWIG_TEMPLATE_TYPEDEF(ePtr<iCryptoInfo>, iCryptoInfoPtr);

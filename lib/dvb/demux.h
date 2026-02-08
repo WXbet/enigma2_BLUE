@@ -25,7 +25,7 @@ public:
 
 	RESULT createSectionReader(eMainloop *context, ePtr<iDVBSectionReader> &reader);
 	RESULT createPESReader(eMainloop *context, ePtr<iDVBPESReader> &reader);
-	RESULT createTSRecorder(ePtr<iDVBTSRecorder> &recorder, int packetsize = 188, bool streaming=false, bool sync_mode=false, bool is_streaming_output=false);
+	RESULT createTSRecorder(ePtr<iDVBTSRecorder> &recorder, unsigned int packetsize = 188, bool streaming=false, bool sync_mode=false, bool is_streaming_output=false);
 	RESULT getMPEGDecoder(ePtr<iTSMPEGDecoder> &reader, int index);
 	RESULT getSTC(pts_t &pts, int num);
 	RESULT getCADemuxID(uint8_t &id) { id = demux; return 0; }
@@ -157,6 +157,7 @@ public:
 	~eDVBRecordScrambledThread();
 
 	// Wait for first data to be written (for decoder sync)
+	// Returns true if data arrived, false on timeout
 	/* override */ bool waitForFirstData(int timeout_ms);
 
 	// Reset the first-data flag (call before start() if reusing)
@@ -166,6 +167,9 @@ protected:
 	int writeData(int len);
 
 private:
+	unsigned char key[8];
+	uint32_t* ks;
+
 	// Synchronization for first data notification
 	pthread_mutex_t m_data_ready_mutex;
 	pthread_cond_t m_data_ready_cond;
